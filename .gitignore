@@ -15,3 +15,6 @@ dist/
 *.log
 .DS_Store
 __pycache__/
+
+# 抓包文件（含 token/cookie，切勿提交）
+*.har

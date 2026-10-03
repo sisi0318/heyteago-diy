@@ -74,8 +74,9 @@ export function TokenPanel({ token, remember, user, busy, onTokenChange, onUserC
     setFeedback(null);
     try {
       const captcha = await runCaptcha(HEYTEA_CAPTCHA_APP_ID);
-      await requestLoginSms(phone);
-      // 短信发出后才存 ticket：没收到验证码时 ticket 无意义
+      // 验证码在“发短信”这步消费（网关在此强制人机校验）
+      await requestLoginSms(phone, captcha.ticket, captcha.randstr);
+      // 标记短信已发出，解锁登录按钮（ticket 值本身登录环节不再使用）
       setTicket(captcha.ticket);
       // 重发后旧验证码大概率已失效，清空避免误提交
       setCode("");
@@ -94,7 +95,7 @@ export function TokenPanel({ token, remember, user, busy, onTokenChange, onUserC
     setLoggingIn(true);
     setFeedback(null);
     try {
-      const result = await loginByPhone(phone, code.trim(), ticket);
+      const result = await loginByPhone(phone, code.trim());
       onTokenChange(result.token, remember);
       onUserChange(result.user);
       setTicket(null);

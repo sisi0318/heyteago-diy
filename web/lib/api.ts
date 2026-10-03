@@ -42,11 +42,17 @@ export async function fetchUser(token?: string): Promise<User> {
   return body.user as User;
 }
 
-export async function requestLoginSms(phone: string): Promise<void> {
+// requestLoginSms 发送验证码：网关在该接口强制人机校验，需带上腾讯验证码
+// 的 ticket/randstr（在发短信这步消费，登录环节不再需要）。
+export async function requestLoginSms(
+  phone: string,
+  ticket: string,
+  randstr: string,
+): Promise<void> {
   const resp = await fetch("/api/login/sms", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, ticket, randstr }),
   });
   if (!resp.ok) throw await parseError(resp);
 }
@@ -54,12 +60,11 @@ export async function requestLoginSms(phone: string): Promise<void> {
 export async function loginByPhone(
   phone: string,
   code: string,
-  ticket: string,
 ): Promise<{ token: string; user: User }> {
   const resp = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, code, ticket }),
+    body: JSON.stringify({ phone, code }),
   });
   if (!resp.ok) throw await parseError(resp);
   return resp.json();

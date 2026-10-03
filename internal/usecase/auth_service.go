@@ -17,11 +17,11 @@ func NewAuthService(gateway StickerGateway) *AuthService {
 	return &AuthService{gateway: gateway}
 }
 
-func (s *AuthService) SendLoginSms(ctx context.Context, phone string) error {
+func (s *AuthService) SendLoginSms(ctx context.Context, phone, ticket, randstr string) error {
 	if !phonePattern.MatchString(phone) {
 		return ErrInvalidPhone
 	}
-	return s.gateway.SendLoginSms(ctx, phone)
+	return s.gateway.SendLoginSms(ctx, phone, ticket, randstr)
 }
 
 // Login 用短信验证码换 token，并查回用户信息（上传链路需要 user_main_id，
@@ -33,9 +33,7 @@ func (s *AuthService) Login(ctx context.Context, phone, code, ticket string) (Au
 	if code == "" {
 		return AuthOutput{}, ErrMissingSmsCode
 	}
-	if ticket == "" {
-		return AuthOutput{}, ErrMissingTicket
-	}
+	// 人机验证已在发短信环节完成，登录不再要求 ticket（ticket 可为空）。
 
 	token, err := s.gateway.LoginByPhone(ctx, PhoneLogin{Phone: phone, Code: code, Ticket: ticket})
 	if err != nil {

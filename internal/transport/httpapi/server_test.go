@@ -48,7 +48,7 @@ func (f *fakeGateway) UserInfo(_ context.Context, token string) (domain.User, er
 	return domain.User{UserMainID: 7, Name: "测试"}, nil
 }
 
-func (f *fakeGateway) SendLoginSms(_ context.Context, mobile string) error {
+func (f *fakeGateway) SendLoginSms(_ context.Context, mobile, _, _ string) error {
 	f.lastSmsMobile = mobile
 	return nil
 }

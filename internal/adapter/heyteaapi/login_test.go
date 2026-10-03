@@ -112,7 +112,7 @@ func TestSendLoginSmsRequestShape(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
 	})
 
-	if err := c.SendLoginSms(context.Background(), "13800138000"); err != nil {
+	if err := c.SendLoginSms(context.Background(), "13800138000", "cap-ticket", "cap-rand"); err != nil {
 		t.Fatalf("SendLoginSms error: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestSendLoginSmsRequestShape(t *testing.T) {
 	if got.body["mobile"] != "0tqoQY+tzIB3DGk10ct8sw==" {
 		t.Errorf("mobile = %v, want AES 加密值", got.body["mobile"])
 	}
-	wantFields := map[string]any{"client": "app", "brandId": "1000001", "zone": "86", "cryptoLevel": float64(2), "ticketFrom": "min"}
+	wantFields := map[string]any{"client": "app", "brandId": "1000001", "zone": "86", "cryptoLevel": float64(2), "ticketFrom": "min", "ticket": "cap-ticket", "randstr": "cap-rand"}
 	for k, v := range wantFields {
 		if got.body[k] != v {
 			t.Errorf("body[%s] = %v, want %v", k, got.body[k], v)
@@ -175,7 +175,7 @@ func TestSendLoginSmsBusinessError(t *testing.T) {
 	c := newLoginTestClient(t, noopSigner{}, &fakeTransport{ticket: "st-123"}, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"code":610015,"message":"发送太频繁","data":null}`))
 	})
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	be, ok := err.(*usecase.BusinessError)
 	if !ok || be.Code != 610015 {
 		t.Fatalf("err = %v, want BusinessError 610015", err)
@@ -330,7 +330,7 @@ func TestSendLoginSmsTicketError(t *testing.T) {
 		called = true
 	})
 
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	if err == nil || !strings.Contains(err.Error(), "获取喜茶安全传输 ticket 失败") {
 		t.Fatalf("err = %v, want 获取喜茶安全传输 ticket 失败", err)
 	}
@@ -346,7 +346,7 @@ func TestSendLoginSmsEncryptError(t *testing.T) {
 		called = true
 	})
 
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	if err == nil || !strings.Contains(err.Error(), "喜茶安全传输加密请求体失败") {
 		t.Fatalf("err = %v, want 喜茶安全传输加密请求体失败", err)
 	}
@@ -385,7 +385,7 @@ func TestLiveSendLoginSms(t *testing.T) {
 	defer src.Close()
 
 	c := New(noopSigner{}, src)
-	err := c.SendLoginSms(context.Background(), "123")
+	err := c.SendLoginSms(context.Background(), "123", "", "")
 	var be *usecase.BusinessError
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v, want BusinessError（加密链路穿透网关到达业务层）", err)

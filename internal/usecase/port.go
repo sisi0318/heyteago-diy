@@ -35,7 +35,9 @@ type StickerGateway interface {
 	UploadSticker(ctx context.Context, req StickerUpload) (domain.Result, error)
 	SaveDraft(ctx context.Context, req DraftSave) (domain.Result, error)
 	UserInfo(ctx context.Context, token string) (domain.User, error)
-	SendLoginSms(ctx context.Context, mobile string) error
+	// SendLoginSms 发送登录短信验证码；ticket/randstr 为腾讯验证码结果，
+	// 网关在该接口强制人机校验。
+	SendLoginSms(ctx context.Context, mobile, ticket, randstr string) error
 	LoginByPhone(ctx context.Context, req PhoneLogin) (string, error)
 }
 

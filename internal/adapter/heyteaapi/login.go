@@ -25,20 +25,29 @@ const (
 	loginClientVersion = "164"
 )
 
-// SendLoginSms 发送登录短信验证码。
-func (c *Client) SendLoginSms(ctx context.Context, mobile string) error {
+// SendLoginSms 发送登录短信验证码。ticket/randstr 是腾讯验证码结果——
+// 网关在该接口强制人机校验，缺失会被拒（实测返回“版本较低/验证失败”这类
+// 迷惑性文案）；二者为空时按历史形状发送（仅用于低风控或测试）。
+func (c *Client) SendLoginSms(ctx context.Context, mobile, ticket, randstr string) error {
 	enc, err := EncryptMobile(mobile)
 	if err != nil {
 		return err
 	}
-	_, err = c.postJSON(ctx, smsPath, map[string]any{
+	body := map[string]any{
 		"client":      "app",
 		"brandId":     brandID,
 		"mobile":      enc,
 		"zone":        "86",
 		"cryptoLevel": 2,
 		"ticketFrom":  "min",
-	}, nil)
+	}
+	if ticket != "" {
+		body["ticket"] = ticket
+	}
+	if randstr != "" {
+		body["randstr"] = randstr
+	}
+	_, err = c.postJSON(ctx, smsPath, body, nil)
 	return err
 }
 
