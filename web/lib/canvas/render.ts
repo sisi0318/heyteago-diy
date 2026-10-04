@@ -6,12 +6,14 @@ import {
   quantizeColors,
   type DotPattern,
 } from "./pixels";
-import { CUP_HEIGHT, CUP_WIDTH, MAX_UPLOAD_BYTES } from "./constants";
-
 export type ToneMode = "binary" | "dots" | "original";
 export type FitMode = "contain" | "cover";
 
 export interface RenderOptions {
+  // 画布尺寸与导出上限，取自当前平台规格
+  width: number;
+  height: number;
+  maxBytes: number;
   toneMode: ToneMode;
   threshold: number;
   density: number;
@@ -38,27 +40,28 @@ export function readFileAsImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-// 把原图按当前设置渲染到 596×832 画布并导出压缩后的 Blob。
+// 把原图按当前设置渲染到平台画布（如喜茶 596×832）并导出压缩后的 Blob。
 // 返回的 Blob 同时作为预览与画笔编辑的基底。
 export async function renderSticker(
   image: HTMLImageElement,
   options: RenderOptions,
 ): Promise<Blob> {
+  const { width, height } = options;
   const canvas = document.createElement("canvas");
-  canvas.width = CUP_WIDTH;
-  canvas.height = CUP_HEIGHT;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("当前浏览器不支持 Canvas");
 
   const scale =
     options.fit === "cover"
-      ? Math.max(CUP_WIDTH / image.width, CUP_HEIGHT / image.height)
-      : Math.min(CUP_WIDTH / image.width, CUP_HEIGHT / image.height);
+      ? Math.max(width / image.width, height / image.height)
+      : Math.min(width / image.width, height / image.height);
   const drawWidth = image.width * scale;
   const drawHeight = image.height * scale;
-  ctx.drawImage(image, (CUP_WIDTH - drawWidth) / 2, (CUP_HEIGHT - drawHeight) / 2, drawWidth, drawHeight);
+  ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
 
-  const imageData = ctx.getImageData(0, 0, CUP_WIDTH, CUP_HEIGHT);
+  const imageData = ctx.getImageData(0, 0, width, height);
   if (options.toneMode === "binary") {
     applyBinaryThreshold(imageData, options.threshold);
   } else if (options.toneMode === "dots") {
@@ -69,21 +72,28 @@ export async function renderSticker(
   }
   ctx.putImageData(imageData, 0, 0);
 
-  return compressPngFirst(ctx, imageData, MAX_UPLOAD_BYTES, options.forcePng);
+  return compressPngFirst(ctx, imageData, options.maxBytes, options.forcePng);
+}
+
+export interface ExportOptions {
+  background: string | null;
+  maxBytes: number;
+  // 平台只收 PNG：不退 JPEG，略超上限也照常导出 PNG
+  pngOnly: boolean;
 }
 
 // 画笔编辑后的画布导出：不做量化（避免破坏笔触），PNG 优先、超限退 JPEG；
 // 底色开启时先合成到底色上（橡皮擦的透明孔洞变回底色）。
 export async function exportEditedCanvas(
   canvas: HTMLCanvasElement,
-  background: string | null,
+  { background, maxBytes, pngOnly }: ExportOptions,
 ): Promise<Blob> {
   const source = background ? compositeOver(canvas, background) : canvas;
   const png = await canvasToBlob(source, "image/png");
-  if (png && png.size <= MAX_UPLOAD_BYTES) return png;
+  if (png && (png.size <= maxBytes || pngOnly)) return png;
   for (let quality = 0.95; quality >= 0.3; quality -= 0.05) {
     const blob = await canvasToBlob(source, "image/jpeg", quality);
-    if (blob && blob.size <= MAX_UPLOAD_BYTES) return blob;
+    if (blob && blob.size <= maxBytes) return blob;
   }
   if (png) return png;
   throw new Error("无法导出图片");

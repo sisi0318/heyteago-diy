@@ -9,7 +9,7 @@ import (
 	"github.com/DiheMoe/heyteago-diy/internal/domain"
 )
 
-// StickerService 承载杯贴上传与草稿保存。
+// StickerService 承载喜茶杯贴上传与草稿保存。
 type StickerService struct {
 	signer  Signer
 	gateway StickerGateway
@@ -25,8 +25,8 @@ func (s *StickerService) Upload(ctx context.Context, in StickerUpload) (UploadOu
 	if in.Token == "" {
 		return UploadOutput{}, ErrMissingToken
 	}
-	if in.UserMainID == "" {
-		return UploadOutput{}, ErrMissingUserMainID
+	if in.UserID == "" {
+		return UploadOutput{}, ErrMissingUserID
 	}
 	if err := validateFile(in.File); err != nil {
 		return UploadOutput{}, err

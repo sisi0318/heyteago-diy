@@ -41,10 +41,21 @@ type StickerGateway interface {
 	LoginByPhone(ctx context.Context, req PhoneLogin) (string, error)
 }
 
-// StickerUpload 是一次正式上传所需的全部入参；Hash 由用例签名后填入。
+// NayukiGateway 是奈雪小程序通道（tm-api.pin-dao.cn）的出网端口。
+type NayukiGateway interface {
+	// UploadImage 取 OSS 临时凭证并把图片直传到奈雪的 OSS，返回图片 URL。
+	UploadImage(ctx context.Context, token, contentType string, file []byte) (string, error)
+	// SaveWork 把图片 URL 提交为杯贴作品，返回上游 data。
+	SaveWork(ctx context.Context, token, imageURL string) (json.RawMessage, error)
+	// Nickname 查询账号昵称（我的页账户信息接口），同时确认 token 仍被接受。
+	Nickname(ctx context.Context, token string) (string, error)
+}
+
+// StickerUpload 是一次正式上传的入参，各平台共用。
+// UserID、Hash、Width、Height 只有喜茶使用，Hash 由用例签名后填入。
 type StickerUpload struct {
 	Token       string
-	UserMainID  string
+	UserID      string
 	Hash        string
 	FileName    string
 	ContentType string
@@ -53,7 +64,7 @@ type StickerUpload struct {
 	Height      int
 }
 
-// DraftSave 是保存草稿的入参（草稿链路不需要 userMainId 与 sign/t 参数）。
+// DraftSave 是喜茶保存草稿的入参（草稿链路不需要用户 ID 与 sign/t 参数）。
 type DraftSave struct {
 	Token       string
 	Hash        string

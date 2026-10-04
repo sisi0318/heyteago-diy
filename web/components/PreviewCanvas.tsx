@@ -1,14 +1,17 @@
 "use client";
 
-// 596×832 预览画布：显示渲染结果，支持画笔/橡皮擦编辑。
+// 平台尺寸的预览画布：显示渲染结果，支持画笔/橡皮擦编辑。
 // 笔画快照（撤销栈）由父组件在 onStrokeStart 里维护。
 import { useRef, type PointerEvent, type RefObject } from "react";
-import { CUP_HEIGHT, CUP_WIDTH } from "@/lib/canvas/constants";
 
 export type Tool = "brush" | "eraser";
 
 interface Props {
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  width: number;
+  height: number;
+  // 平台杯贴底色，作为画布 CSS 底色
+  background: string;
   ready: boolean;
   tool: Tool;
   brushColor: string;
@@ -16,7 +19,17 @@ interface Props {
   onStrokeStart(): void;
 }
 
-export function PreviewCanvas({ canvasRef, ready, tool, brushColor, brushSize, onStrokeStart }: Props) {
+export function PreviewCanvas({
+  canvasRef,
+  width,
+  height,
+  background,
+  ready,
+  tool,
+  brushColor,
+  brushSize,
+  onStrokeStart,
+}: Props) {
   const drawing = useRef(false);
 
   const toCanvasPoint = (e: PointerEvent<HTMLCanvasElement>) => {
@@ -47,7 +60,7 @@ export function PreviewCanvas({ canvasRef, ready, tool, brushColor, brushSize, o
     ctx.lineJoin = "round";
     ctx.lineWidth = brushSize;
     // 橡皮擦用 destination-out 抠出透明，导出时再合成到底色上；
-    // 画布 CSS 底色同为 #EEEEEE，预览时孔洞不显白
+    // 画布 CSS 底色同为平台底色，预览时孔洞不显白
     ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
     ctx.strokeStyle = brushColor;
     ctx.beginPath();
@@ -72,18 +85,19 @@ export function PreviewCanvas({ canvasRef, ready, tool, brushColor, brushSize, o
   return (
     <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
       <h2 className="mb-3 text-sm font-semibold text-neutral-800">
-        预览 <span className="ml-1 font-normal text-neutral-400">{CUP_WIDTH}×{CUP_HEIGHT}</span>
+        预览 <span className="ml-1 font-normal text-neutral-400">{width}×{height}</span>
       </h2>
       <div className="flex justify-center">
         <canvas
           ref={canvasRef}
-          width={CUP_WIDTH}
-          height={CUP_HEIGHT}
+          width={width}
+          height={height}
           onPointerDown={ready ? beginStroke : undefined}
           onPointerMove={ready ? moveStroke : undefined}
           onPointerUp={endStroke}
           onPointerCancel={endStroke}
-          className={`max-h-[560px] w-auto max-w-full rounded-lg border border-neutral-200 bg-[#EEEEEE] ${
+          style={{ backgroundColor: background }}
+          className={`max-h-[560px] w-auto max-w-full rounded-lg border border-neutral-200 ${
             ready ? "cursor-crosshair touch-none" : "opacity-60"
           }`}
         />

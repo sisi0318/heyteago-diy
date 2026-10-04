@@ -1,6 +1,6 @@
 "use client";
 
-// 喜茶官方画布底色替换：近白与透明像素换成 #EEEEEE，杯贴观感与官方一致。
+// 杯贴底色替换：近白与透明像素换成平台底色（喜茶 #EEEEEE、奈雪 #FFFFFF），观感与官方一致。
 export interface BackgroundSettings {
   enabled: boolean;
   color: string;
@@ -22,7 +22,7 @@ export function BackgroundControls({ value, onChange }: Props) {
           checked={value.enabled}
           onChange={(e) => onChange({ ...value, enabled: e.target.checked })}
         />
-        替换近白/透明区域为喜茶底色
+        替换近白/透明区域为杯贴底色
       </label>
       {value.enabled && (
         <>

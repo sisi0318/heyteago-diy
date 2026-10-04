@@ -60,7 +60,7 @@ func okResult() domain.Result {
 }
 
 func validUpload() StickerUpload {
-	return StickerUpload{Token: "t", UserMainID: "42", File: []byte("png-bytes")}
+	return StickerUpload{Token: "t", UserID: "42", File: []byte("png-bytes")}
 }
 
 func TestUploadSuccess(t *testing.T) {
@@ -154,10 +154,10 @@ func TestUploadValidation(t *testing.T) {
 		in   StickerUpload
 		want error
 	}{
-		{"missing token", StickerUpload{UserMainID: "1", File: []byte("x")}, ErrMissingToken},
-		{"missing userMainId", StickerUpload{Token: "t", File: []byte("x")}, ErrMissingUserMainID},
-		{"missing file", StickerUpload{Token: "t", UserMainID: "1"}, ErrMissingFile},
-		{"file too large", StickerUpload{Token: "t", UserMainID: "1", File: make([]byte, domain.MaxUploadBytes+1)}, ErrFileTooLarge},
+		{"missing token", StickerUpload{UserID: "1", File: []byte("x")}, ErrMissingToken},
+		{"missing userId", StickerUpload{Token: "t", File: []byte("x")}, ErrMissingUserID},
+		{"missing file", StickerUpload{Token: "t", UserID: "1"}, ErrMissingFile},
+		{"file too large", StickerUpload{Token: "t", UserID: "1", File: make([]byte, domain.MaxUploadBytes+1)}, ErrFileTooLarge},
 	}
 	for _, c := range cases {
 		if _, err := svc.Upload(context.Background(), c.in); !errors.Is(err, c.want) {

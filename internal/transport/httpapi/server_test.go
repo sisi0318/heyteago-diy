@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -45,7 +47,7 @@ func (f *fakeGateway) UserInfo(_ context.Context, token string) (domain.User, er
 	if token != "file-token" && token != "given-token" && token != "login-token" {
 		return domain.User{}, &usecase.BusinessError{Code: 401, Message: "登录态失效"}
 	}
-	return domain.User{UserMainID: 7, Name: "测试"}, nil
+	return domain.User{ID: "7", Name: "测试"}, nil
 }
 
 func (f *fakeGateway) SendLoginSms(_ context.Context, mobile, _, _ string) error {
@@ -61,11 +63,43 @@ func (f *fakeGateway) LoginByPhone(_ context.Context, req usecase.PhoneLogin) (s
 	return f.loginToken, nil
 }
 
+// fakeNayuki 直接满足 transport 的入站接口，只记录入参（不经用例层）。
+type fakeNayuki struct {
+	lastUpload usecase.StickerUpload
+	uploadErr  error
+	userErr    error
+}
+
+func (f *fakeNayuki) Upload(_ context.Context, in usecase.StickerUpload) (usecase.UploadOutput, error) {
+	f.lastUpload = in
+	if f.uploadErr != nil {
+		return usecase.UploadOutput{}, f.uploadErr
+	}
+	return usecase.UploadOutput{Message: "上传成功", Data: json.RawMessage(`{"workId":1}`)}, nil
+}
+
+func (f *fakeNayuki) UserInfo(_ context.Context, _ string) (domain.User, error) {
+	if f.userErr != nil {
+		return domain.User{}, f.userErr
+	}
+	return domain.User{ID: "224307153"}, nil
+}
+
 func newTestServer(gw *fakeGateway) http.Handler {
+	return newTestServerWith(gw, &fakeNayuki{})
+}
+
+func newTestServerWith(gw *fakeGateway, nayuki *fakeNayuki) http.Handler {
 	stickers := usecase.NewStickerService(fakeSigner{}, gw)
-	users := usecase.NewUserService(gw)
-	auth := usecase.NewAuthService(gw)
-	return NewServer(stickers, users, auth).Handler()
+	return NewServer(map[string]Platform{
+		"heytea": {
+			Stickers: stickers,
+			Users:    usecase.NewUserService(gw),
+			Drafts:   stickers,
+			Auth:     usecase.NewAuthService(gw),
+		},
+		"nayuki": {Stickers: nayuki, Users: nayuki},
+	}).Handler()
 }
 
 func multipartBody(t *testing.T, fields map[string]string, fileField, fileName string, file []byte) (string, *bytes.Buffer) {
@@ -97,8 +131,8 @@ func TestUploadMissingToken(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	ctype, body := multipartBody(t, map[string]string{"userMainId": "42"}, "file", "cup.png", []byte("img"))
-	resp, err := http.Post(srv.URL+"/api/upload", ctype, body)
+	ctype, body := multipartBody(t, map[string]string{"userId": "42"}, "file", "cup.png", []byte("img"))
+	resp, err := http.Post(srv.URL+"/api/heytea/upload", ctype, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +148,8 @@ func TestUploadProvidedTokenWins(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	ctype, body := multipartBody(t, map[string]string{"userMainId": "42", "token": "given-token"}, "file", "cup.png", []byte("img"))
-	resp, err := http.Post(srv.URL+"/api/upload", ctype, body)
+	ctype, body := multipartBody(t, map[string]string{"userId": "42", "token": "given-token"}, "file", "cup.png", []byte("img"))
+	resp, err := http.Post(srv.URL+"/api/heytea/upload", ctype, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,13 +159,13 @@ func TestUploadProvidedTokenWins(t *testing.T) {
 	}
 }
 
-func TestUploadMissingUserMainID(t *testing.T) {
+func TestUploadMissingUserID(t *testing.T) {
 	gw := &fakeGateway{}
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
 	ctype, body := multipartBody(t, map[string]string{"token": "given-token"}, "file", "cup.png", []byte("img"))
-	resp, err := http.Post(srv.URL+"/api/upload", ctype, body)
+	resp, err := http.Post(srv.URL+"/api/heytea/upload", ctype, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +180,8 @@ func TestUploadMissingFile(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	ctype, body := multipartBody(t, map[string]string{"userMainId": "42"}, "", "", nil)
-	resp, err := http.Post(srv.URL+"/api/upload", ctype, body)
+	ctype, body := multipartBody(t, map[string]string{"userId": "42"}, "", "", nil)
+	resp, err := http.Post(srv.URL+"/api/heytea/upload", ctype, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +197,7 @@ func TestSaveDraftOK(t *testing.T) {
 	defer srv.Close()
 
 	ctype, body := multipartBody(t, map[string]string{"token": "given-token"}, "file", "cup.png", []byte("img"))
-	resp, err := http.Post(srv.URL+"/api/draft/save", ctype, body)
+	resp, err := http.Post(srv.URL+"/api/heytea/draft/save", ctype, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +216,7 @@ func TestUserEndpoint(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/user?token=file-token")
+	resp, err := http.Get(srv.URL + "/api/heytea/user?token=file-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +230,7 @@ func TestUserEndpoint(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if out.User.UserMainID != 7 {
+	if out.User.ID != "7" {
 		t.Fatalf("user = %+v", out.User)
 	}
 }
@@ -206,7 +240,7 @@ func TestUserEndpointBearer(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/user", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/heytea/user", nil)
 	req.Header.Set("Authorization", "Bearer given-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -263,7 +297,7 @@ func TestLoginSmsOK(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp := postJSON(t, srv.URL+"/api/login/sms", `{"phone":"13800138000"}`)
+	resp := postJSON(t, srv.URL+"/api/heytea/login/sms", `{"phone":"13800138000"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -279,7 +313,7 @@ func TestLoginSmsInvalidPhone(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp := postJSON(t, srv.URL+"/api/login/sms", `{"phone":"abc"}`)
+	resp := postJSON(t, srv.URL+"/api/heytea/login/sms", `{"phone":"abc"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -294,7 +328,7 @@ func TestLoginOK(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp := postJSON(t, srv.URL+"/api/login", `{"phone":"13800138000","code":"123456","ticket":"t123"}`)
+	resp := postJSON(t, srv.URL+"/api/heytea/login", `{"phone":"13800138000","code":"123456","ticket":"t123"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -307,7 +341,7 @@ func TestLoginOK(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Token != "login-token" || out.User.UserMainID != 7 {
+	if out.Token != "login-token" || out.User.ID != "7" {
 		t.Fatalf("out = %+v", out)
 	}
 	if gw.lastLogin != (usecase.PhoneLogin{Phone: "13800138000", Code: "123456", Ticket: "t123"}) {
@@ -320,7 +354,7 @@ func TestLoginMissingFields(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp := postJSON(t, srv.URL+"/api/login", `{"phone":"13800138000"}`)
+	resp := postJSON(t, srv.URL+"/api/heytea/login", `{"phone":"13800138000"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -332,9 +366,115 @@ func TestLoginBadJSON(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(gw))
 	defer srv.Close()
 
-	resp := postJSON(t, srv.URL+"/api/login", `not json`)
+	resp := postJSON(t, srv.URL+"/api/heytea/login", `not json`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUnknownPlatform(t *testing.T) {
+	srv := httptest.NewServer(newTestServer(&fakeGateway{}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/coco/user?token=t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// 奈雪上传不需要 userId：表单只有 token + file。
+func TestNayukiUploadRoute(t *testing.T) {
+	nayuki := &fakeNayuki{}
+	srv := httptest.NewServer(newTestServerWith(&fakeGateway{}, nayuki))
+	defer srv.Close()
+
+	ctype, body := multipartBody(t, map[string]string{"token": "jwt"}, "file", "cup.png", []byte("img"))
+	resp, err := http.Post(srv.URL+"/api/nayuki/upload", ctype, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	if nayuki.lastUpload.Token != "jwt" || string(nayuki.lastUpload.File) != "img" {
+		t.Fatalf("upload = %+v", nayuki.lastUpload)
+	}
+}
+
+func TestNayukiUnsupportedFeatures(t *testing.T) {
+	srv := httptest.NewServer(newTestServer(&fakeGateway{}))
+	defer srv.Close()
+
+	ctype, body := multipartBody(t, map[string]string{"token": "jwt"}, "file", "cup.png", []byte("img"))
+	draft, err := http.Post(srv.URL+"/api/nayuki/draft/save", ctype, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.Body.Close()
+	sms := postJSON(t, srv.URL+"/api/nayuki/login/sms", `{"phone":"13800138000"}`)
+	sms.Body.Close()
+	login := postJSON(t, srv.URL+"/api/nayuki/login", `{"phone":"13800138000","code":"1"}`)
+	login.Body.Close()
+
+	for name, resp := range map[string]*http.Response{"draft": draft, "sms": sms, "login": login} {
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404", name, resp.StatusCode)
+		}
+	}
+}
+
+func TestNayukiUser(t *testing.T) {
+	srv := httptest.NewServer(newTestServer(&fakeGateway{}))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/nayuki/user", nil)
+	req.Header.Set("Authorization", "Bearer jwt")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		User domain.User `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.User.ID != "224307153" {
+		t.Fatalf("user = %+v", out.User)
+	}
+}
+
+func TestErrorStatusMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"token 过期", fmt.Errorf("%w（到期时间 x）", usecase.ErrTokenExpired), http.StatusBadRequest},
+		{"token 格式错", usecase.ErrInvalidToken, http.StatusBadRequest},
+		{"上游失败", &usecase.UpstreamError{Err: errors.New("请求奈雪失败")}, http.StatusBadGateway},
+		{"业务错误", &usecase.BusinessError{Code: 40001, Message: "登录失效"}, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(newTestServerWith(&fakeGateway{}, &fakeNayuki{userErr: c.err}))
+			defer srv.Close()
+			resp, err := http.Get(srv.URL + "/api/nayuki/user?token=jwt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != c.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, c.want)
+			}
+		})
 	}
 }
