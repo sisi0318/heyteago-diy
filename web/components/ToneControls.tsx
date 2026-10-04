@@ -15,6 +15,10 @@ export interface ToneSettings {
 
 interface Props {
   value: ToneSettings;
+  // 当前平台的体积上限文案（如 200KB）
+  limitLabel: string;
+  // 平台只收 PNG 时不提供“强制 PNG”选项
+  pngOnly: boolean;
   onChange(next: ToneSettings): void;
 }
 
@@ -25,7 +29,7 @@ const PATTERNS: Array<{ value: DotPattern; label: string }> = [
   { value: "grid", label: "网格" },
 ];
 
-export function ToneControls({ value, onChange }: Props) {
+export function ToneControls({ value, limitLabel, pngOnly, onChange }: Props) {
   const set = <K extends keyof ToneSettings>(key: K, v: ToneSettings[K]) =>
     onChange({ ...value, [key]: v });
 
@@ -116,10 +120,12 @@ export function ToneControls({ value, onChange }: Props) {
         </div>
       </div>
 
-      <label className="mt-3 flex items-center gap-1.5 text-xs text-neutral-600">
-        <input type="checkbox" checked={value.forcePng} onChange={(e) => set("forcePng", e.target.checked)} />
-        强制 PNG（压不进 200KB 时报错而不是转 JPEG）
-      </label>
+      {!pngOnly && (
+        <label className="mt-3 flex items-center gap-1.5 text-xs text-neutral-600">
+          <input type="checkbox" checked={value.forcePng} onChange={(e) => set("forcePng", e.target.checked)} />
+          强制 PNG（压不进 {limitLabel} 时报错而不是转 JPEG）
+        </label>
+      )}
     </section>
   );
 }

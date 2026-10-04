@@ -70,7 +70,7 @@ func (c *Client) UploadSticker(ctx context.Context, req usecase.StickerUpload) (
 	}
 
 	ts := time.Now().UnixMilli()
-	sign := timestampSign(req.UserMainID, ts)
+	sign := timestampSign(req.UserID, ts)
 	url := fmt.Sprintf("%s/api/service-cps/user/diy?sign=%s&t=%d&hash=%s",
 		c.baseURL, sign, ts, req.Hash)
 
@@ -127,11 +127,14 @@ func (c *Client) UserInfo(ctx context.Context, token string) (domain.User, error
 	if env.Code != 0 {
 		return domain.User{}, &usecase.BusinessError{Code: env.Code, Message: env.Message}
 	}
-	var user domain.User
-	if err := json.Unmarshal(env.Data, &user); err != nil {
+	var info struct {
+		UserMainID int64  `json:"user_main_id"`
+		Name       string `json:"name"`
+	}
+	if err := json.Unmarshal(env.Data, &info); err != nil {
 		return domain.User{}, fmt.Errorf("用户信息解析失败: %w", err)
 	}
-	return user, nil
+	return domain.User{ID: strconv.FormatInt(info.UserMainID, 10), Name: info.Name}, nil
 }
 
 func (c *Client) post(ctx context.Context, url string, body *bytes.Buffer, contentType, token string) (domain.Result, error) {

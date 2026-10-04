@@ -1,7 +1,9 @@
-// 后端 API 客户端。浏览器经 Next 同源代理访问 Go 服务（见 next.config.ts rewrites）。
+// 后端 API 客户端。浏览器经 Next 同源代理访问 Go 服务（见 next.config.ts rewrites），
+// 路由按平台分组：/api/{platform}/...
+import type { PlatformId } from "@/lib/platforms";
 
 export interface User {
-  user_main_id: number;
+  id: string;
   name: string;
 }
 
@@ -33,8 +35,8 @@ async function parseError(resp: Response): Promise<ApiError> {
   return new ApiError(message, resp.status, code);
 }
 
-export async function fetchUser(token?: string): Promise<User> {
-  const resp = await fetch("/api/user", {
+export async function fetchUser(platform: PlatformId, token?: string): Promise<User> {
+  const resp = await fetch(`/api/${platform}/user`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) throw await parseError(resp);
@@ -42,51 +44,59 @@ export async function fetchUser(token?: string): Promise<User> {
   return body.user as User;
 }
 
-export async function requestLoginSms(phone: string): Promise<void> {
-  const resp = await fetch("/api/login/sms", {
+// requestLoginSms 发送验证码：网关在该接口强制人机校验，需带上腾讯验证码
+// 的 ticket/randstr（在发短信这步消费，登录环节不再需要）。
+export async function requestLoginSms(
+  platform: PlatformId,
+  phone: string,
+  ticket: string,
+  randstr: string,
+): Promise<void> {
+  const resp = await fetch(`/api/${platform}/login/sms`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, ticket, randstr }),
   });
   if (!resp.ok) throw await parseError(resp);
 }
 
 export async function loginByPhone(
+  platform: PlatformId,
   phone: string,
   code: string,
-  ticket: string,
 ): Promise<{ token: string; user: User }> {
-  const resp = await fetch("/api/login", {
+  const resp = await fetch(`/api/${platform}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, code, ticket }),
+    body: JSON.stringify({ phone, code }),
   });
   if (!resp.ok) throw await parseError(resp);
   return resp.json();
 }
 
 export async function uploadSticker(
+  platform: PlatformId,
   blob: Blob,
-  opts: { token: string; userMainId: number; width?: number; height?: number },
+  opts: { token: string; userId: string; width?: number; height?: number },
 ): Promise<UploadResult> {
   const form = new FormData();
   form.append("file", blob, fileNameFor(blob));
   form.append("token", opts.token);
-  form.append("userMainId", String(opts.userMainId));
+  form.append("userId", opts.userId);
   if (opts.width) form.append("width", String(opts.width));
   if (opts.height) form.append("height", String(opts.height));
 
-  const resp = await fetch("/api/upload", { method: "POST", body: form });
+  const resp = await fetch(`/api/${platform}/upload`, { method: "POST", body: form });
   if (!resp.ok) throw await parseError(resp);
   return resp.json();
 }
 
-export async function saveDraft(blob: Blob, token: string): Promise<UploadResult> {
+export async function saveDraft(platform: PlatformId, blob: Blob, token: string): Promise<UploadResult> {
   const form = new FormData();
   form.append("file", blob, fileNameFor(blob));
   form.append("token", token);
 
-  const resp = await fetch("/api/draft/save", { method: "POST", body: form });
+  const resp = await fetch(`/api/${platform}/draft/save`, { method: "POST", body: form });
   if (!resp.ok) throw await parseError(resp);
   return resp.json();
 }

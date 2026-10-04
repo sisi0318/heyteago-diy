@@ -89,7 +89,7 @@ func TestUploadStickerRequestShape(t *testing.T) {
 
 	res, err := c.UploadSticker(context.Background(), usecase.StickerUpload{
 		Token:       "tok",
-		UserMainID:  "192728475",
+		UserID:      "192728475",
 		Hash:        "signed-hash",
 		FileName:    "cup.png",
 		ContentType: "image/png",
@@ -202,7 +202,7 @@ func TestUserInfoParsesData(t *testing.T) {
 	if gotAuth != "Bearer tok" {
 		t.Errorf("Authorization = %q", gotAuth)
 	}
-	if user.UserMainID != 192728475 || user.Name != "大猫儿" {
+	if user.ID != "192728475" || user.Name != "大猫儿" {
 		t.Errorf("user = %+v", user)
 	}
 }

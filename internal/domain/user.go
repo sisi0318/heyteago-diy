@@ -1,7 +1,8 @@
 package domain
 
-// User 是喜茶会员信息中本工具用到的字段（App 通道 /api/service-member/vip/user/info）。
+// User 是平台账号中本工具用到的字段。ID 统一为字符串：
+// 喜茶为会员信息里的 user_main_id，奈雪为 token 载荷里的 userId。
 type User struct {
-	UserMainID int64  `json:"user_main_id"`
-	Name       string `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }

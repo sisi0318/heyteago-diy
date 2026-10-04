@@ -9,12 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/DiheMoe/heyteago-diy/internal/adapter/secureticket"
+	"github.com/DiheMoe/heyteago-diy/internal/adapter/appsecure"
 	"github.com/DiheMoe/heyteago-diy/internal/usecase"
 )
 
@@ -114,7 +112,7 @@ func TestSendLoginSmsRequestShape(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
 	})
 
-	if err := c.SendLoginSms(context.Background(), "13800138000"); err != nil {
+	if err := c.SendLoginSms(context.Background(), "13800138000", "cap-ticket", "cap-rand"); err != nil {
 		t.Fatalf("SendLoginSms error: %v", err)
 	}
 
@@ -132,7 +130,7 @@ func TestSendLoginSmsRequestShape(t *testing.T) {
 	if got.body["mobile"] != "0tqoQY+tzIB3DGk10ct8sw==" {
 		t.Errorf("mobile = %v, want AES 加密值", got.body["mobile"])
 	}
-	wantFields := map[string]any{"client": "app", "brandId": "1000001", "zone": "86", "cryptoLevel": float64(2), "ticketFrom": "min"}
+	wantFields := map[string]any{"client": "app", "brandId": "1000001", "zone": "86", "cryptoLevel": float64(2), "ticketFrom": "min", "ticket": "cap-ticket", "randstr": "cap-rand"}
 	for k, v := range wantFields {
 		if got.body[k] != v {
 			t.Errorf("body[%s] = %v, want %v", k, got.body[k], v)
@@ -177,7 +175,7 @@ func TestSendLoginSmsBusinessError(t *testing.T) {
 	c := newLoginTestClient(t, noopSigner{}, &fakeTransport{ticket: "st-123"}, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"code":610015,"message":"发送太频繁","data":null}`))
 	})
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	be, ok := err.(*usecase.BusinessError)
 	if !ok || be.Code != 610015 {
 		t.Fatalf("err = %v, want BusinessError 610015", err)
@@ -332,7 +330,7 @@ func TestSendLoginSmsTicketError(t *testing.T) {
 		called = true
 	})
 
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	if err == nil || !strings.Contains(err.Error(), "获取喜茶安全传输 ticket 失败") {
 		t.Fatalf("err = %v, want 获取喜茶安全传输 ticket 失败", err)
 	}
@@ -348,7 +346,7 @@ func TestSendLoginSmsEncryptError(t *testing.T) {
 		called = true
 	})
 
-	err := c.SendLoginSms(context.Background(), "13800138000")
+	err := c.SendLoginSms(context.Background(), "13800138000", "", "")
 	if err == nil || !strings.Contains(err.Error(), "喜茶安全传输加密请求体失败") {
 		t.Fatalf("err = %v, want 喜茶安全传输加密请求体失败", err)
 	}
@@ -378,22 +376,16 @@ func TestLoginByPhoneEncryptedResponse(t *testing.T) {
 
 // 真实网关探针：加密请求体穿透网关到达业务层（非法手机号返回业务错误码而非
 // HTTP 400 invalid_payload），证明 Secure-Transmission 加解密链路端到端可用。
-// 需要网络、python3 + unicorn 与 bin/libsdk_core.so。
+// 仅需网络。
 func TestLiveSendLoginSms(t *testing.T) {
 	if os.Getenv("HEYTEA_TEST_LIVE") != "1" {
 		t.Skip("set HEYTEA_TEST_LIVE=1 to run")
 	}
-	// DefaultConfig 用相对路径，按仓库根目录（本文件上三级）解析。
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	cfg := secureticket.DefaultConfig()
-	cfg.ScriptPath = filepath.Join(root, "tools", "secure-ticket", "secure_ticket.py")
-	cfg.SoPath = filepath.Join(root, "bin", "libsdk_core.so")
-	src := secureticket.New(cfg)
+	src := appsecure.New(appsecure.DefaultConfig())
 	defer src.Close()
 
 	c := New(noopSigner{}, src)
-	err := c.SendLoginSms(context.Background(), "123")
+	err := c.SendLoginSms(context.Background(), "123", "", "")
 	var be *usecase.BusinessError
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v, want BusinessError（加密链路穿透网关到达业务层）", err)

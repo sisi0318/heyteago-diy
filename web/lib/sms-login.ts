@@ -1,34 +1,33 @@
-// 手机号短信登录流程（与官方 App 行为一致）：
-// 发短信不触发人机验证——官方短信接口不消费人机 ticket；
-// 滑块在登录步触发，ticket 一次性、随当次登录尝试消耗。
-// 因此登录失败（验证码错/ticket 失效）重试只需重新滑块，短信未过期就不必
-// 重发——短信每日有发送上限，要省着用。
+// 手机号短信登录流程：网关在发短信接口强制人机校验（缺 ticket 时返回 4005021），
+// 所以滑块在发短信前触发，ticket/randstr 随短信请求消费；登录接口不再需要 ticket。
+// 因此登录失败（如验证码输错）改正后再点登录即可，短信未过期就不必重发——
+// 短信每日有发送上限，要省着用。
 import type { User } from "./api";
 
 export const PHONE_PATTERN = /^1\d{10}$/;
 
 export interface SmsLoginDeps {
-  runCaptcha(): Promise<{ ticket: string }>;
-  requestLoginSms(phone: string): Promise<void>;
-  loginByPhone(phone: string, code: string, ticket: string): Promise<{ token: string; user: User }>;
+  runCaptcha(): Promise<{ ticket: string; randstr: string }>;
+  requestLoginSms(phone: string, ticket: string, randstr: string): Promise<void>;
+  loginByPhone(phone: string, code: string): Promise<{ token: string; user: User }>;
 }
 
-// sendLoginSms 发送短信验证码。这里刻意不跑滑块（见文件头说明）。
+// sendLoginSms 先过滑块，再带 ticket/randstr 发送短信验证码。
 export async function sendLoginSms(deps: SmsLoginDeps, phone: string): Promise<void> {
   if (!PHONE_PATTERN.test(phone)) throw new Error("请输入 11 位手机号");
-  await deps.requestLoginSms(phone);
+  const captcha = await deps.runCaptcha();
+  await deps.requestLoginSms(phone, captcha.ticket, captcha.randstr);
 }
 
-// loginWithCaptcha 先过滑块再用短信验证码登录；ticket 仅用于本次尝试。
-export async function loginWithCaptcha(
+// loginWithSmsCode 用短信验证码登录；人机验证已在发短信时完成，这里不再过滑块。
+export async function loginWithSmsCode(
   deps: SmsLoginDeps,
   phone: string,
   code: string,
 ): Promise<{ token: string; user: User }> {
   if (!PHONE_PATTERN.test(phone)) throw new Error("请输入 11 位手机号");
   if (!code) throw new Error("请输入短信验证码");
-  const captcha = await deps.runCaptcha();
-  return deps.loginByPhone(phone, code, captcha.ticket);
+  return deps.loginByPhone(phone, code);
 }
 
 // 回执里确认发送目标，138****8000

@@ -9,14 +9,14 @@ import (
 )
 
 func TestLoginSuccess(t *testing.T) {
-	gw := &fakeGateway{loginToken: "tok", user: domain.User{UserMainID: 7, Name: "测试"}}
+	gw := &fakeGateway{loginToken: "tok", user: domain.User{ID: "7", Name: "测试"}}
 	svc := NewAuthService(gw)
 
 	out, err := svc.Login(context.Background(), "13800138000", "123456", "captcha-ticket")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Token != "tok" || out.User.UserMainID != 7 {
+	if out.Token != "tok" || out.User.ID != "7" {
 		t.Fatalf("out = %+v", out)
 	}
 }
@@ -72,14 +72,15 @@ func TestLoginValidation(t *testing.T) {
 	if _, err := svc.Login(context.Background(), "13800138000", "", "t"); !errors.Is(err, ErrMissingSmsCode) {
 		t.Fatalf("err = %v, want ErrMissingSmsCode", err)
 	}
-	if _, err := svc.Login(context.Background(), "13800138000", "123456", ""); !errors.Is(err, ErrMissingTicket) {
-		t.Fatalf("err = %v, want ErrMissingTicket", err)
+	// 人机验证在发短信环节完成，登录不再要求 ticket
+	if _, err := svc.Login(context.Background(), "13800138000", "123456", ""); err != nil {
+		t.Fatalf("err = %v, want 无 ticket 也可登录", err)
 	}
 }
 
 func TestSendLoginSmsValidation(t *testing.T) {
 	svc := NewAuthService(&fakeGateway{})
-	if err := svc.SendLoginSms(context.Background(), "abc"); !errors.Is(err, ErrInvalidPhone) {
+	if err := svc.SendLoginSms(context.Background(), "abc", "", ""); !errors.Is(err, ErrInvalidPhone) {
 		t.Fatalf("err = %v, want ErrInvalidPhone", err)
 	}
 }

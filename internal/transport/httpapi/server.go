@@ -1,8 +1,9 @@
 // Package httpapi 对外暴露 JSON API。只用 net/http 标准库（Go 1.22 方法路由）。
-// token 不落日志；multipart 请求体按领域上限截断。
+// 路由按平台分组为 /api/{platform}/...；token 不落日志；multipart 请求体按领域上限截断。
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,28 +18,70 @@ import (
 	"github.com/DiheMoe/heyteago-diy/internal/usecase"
 )
 
-type Server struct {
-	stickers *usecase.StickerService
-	users    *usecase.UserService
-	auth     *usecase.AuthService
+// 各平台用例对 transport 暴露的能力。
+type (
+	StickerUploader interface {
+		Upload(ctx context.Context, in usecase.StickerUpload) (usecase.UploadOutput, error)
+	}
+	DraftSaver interface {
+		SaveDraft(ctx context.Context, in usecase.DraftSave) (usecase.UploadOutput, error)
+	}
+	UserLookup interface {
+		UserInfo(ctx context.Context, token string) (domain.User, error)
+	}
+	PhoneAuth interface {
+		SendLoginSms(ctx context.Context, phone, ticket, randstr string) error
+		Login(ctx context.Context, phone, code, ticket string) (usecase.AuthOutput, error)
+	}
+)
+
+// Platform 是一个奶茶平台的能力集合：Stickers、Users 必填；
+// Drafts、Auth 为 nil 表示该平台不支持，对应路由返回 404。
+type Platform struct {
+	Stickers StickerUploader
+	Users    UserLookup
+	Drafts   DraftSaver
+	Auth     PhoneAuth
 }
 
-func NewServer(stickers *usecase.StickerService, users *usecase.UserService, auth *usecase.AuthService) *Server {
-	return &Server{stickers: stickers, users: users, auth: auth}
+type Server struct {
+	platforms map[string]Platform
+}
+
+// NewServer 的 platforms 以路由中的平台标识为键（如 heytea、nayuki）。
+func NewServer(platforms map[string]Platform) *Server {
+	return &Server{platforms: platforms}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/upload", s.handleUpload)
-	mux.HandleFunc("POST /api/draft/save", s.handleSaveDraft)
-	mux.HandleFunc("GET /api/user", s.handleUser)
-	mux.HandleFunc("POST /api/login/sms", s.handleLoginSms)
-	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/{platform}/upload", s.handleUpload)
+	mux.HandleFunc("POST /api/{platform}/draft/save", s.handleSaveDraft)
+	mux.HandleFunc("GET /api/{platform}/user", s.handleUser)
+	mux.HandleFunc("POST /api/{platform}/login/sms", s.handleLoginSms)
+	mux.HandleFunc("POST /api/{platform}/login", s.handleLogin)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	return logRequests(mux)
 }
 
+// platform 取路径中 {platform} 对应的平台；未知平台直接写 404。
+func (s *Server) platform(w http.ResponseWriter, r *http.Request) (Platform, bool) {
+	p, ok := s.platforms[r.PathValue("platform")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"message": "未知平台"})
+	}
+	return p, ok
+}
+
+func writeUnsupported(w http.ResponseWriter, feature string) {
+	writeJSON(w, http.StatusNotFound, map[string]any{"message": "该平台不支持" + feature})
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.platform(w, r)
+	if !ok {
+		return
+	}
 	file, header, err := parseFilePart(r)
 	if err != nil {
 		writeError(w, err)
@@ -46,14 +89,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form := r.MultipartForm.Value
-	out, err := s.stickers.Upload(r.Context(), usecase.StickerUpload{
+	out, err := p.Stickers.Upload(r.Context(), usecase.StickerUpload{
 		Token:       firstValue(form, "token"),
-		UserMainID:  firstValue(form, "userMainId"),
+		UserID:      firstValue(form, "userId"),
 		FileName:    header.Filename,
 		ContentType: header.Header.Get("Content-Type"),
 		File:        file,
-		Width:       parseIntOr(firstValue(form, "width"), domain.CupWidth),
-		Height:      parseIntOr(firstValue(form, "height"), domain.CupHeight),
+		// 缺省为 0，由需要画布尺寸的平台用例补默认值
+		Width:  parseIntOr(firstValue(form, "width"), 0),
+		Height: parseIntOr(firstValue(form, "height"), 0),
 	})
 	if err != nil {
 		writeError(w, err)
@@ -63,13 +107,21 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.platform(w, r)
+	if !ok {
+		return
+	}
+	if p.Drafts == nil {
+		writeUnsupported(w, "草稿")
+		return
+	}
 	file, header, err := parseFilePart(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
-	out, err := s.stickers.SaveDraft(r.Context(), usecase.DraftSave{
+	out, err := p.Drafts.SaveDraft(r.Context(), usecase.DraftSave{
 		Token:       firstValue(r.MultipartForm.Value, "token"),
 		FileName:    header.Filename,
 		ContentType: header.Header.Get("Content-Type"),
@@ -83,11 +135,15 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.platform(w, r)
+	if !ok {
+		return
+	}
 	provided := r.URL.Query().Get("token")
 	if auth := r.Header.Get("Authorization"); auth != "" {
 		provided = strings.TrimPrefix(auth, "Bearer ")
 	}
-	user, err := s.users.UserInfo(r.Context(), provided)
+	user, err := p.Users.UserInfo(r.Context(), provided)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -100,14 +156,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginSms(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.platform(w, r)
+	if !ok {
+		return
+	}
+	if p.Auth == nil {
+		writeUnsupported(w, "短信登录")
+		return
+	}
 	var in struct {
-		Phone string `json:"phone"`
+		Phone   string `json:"phone"`
+		Ticket  string `json:"ticket"`
+		Randstr string `json:"randstr"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, err)
 		return
 	}
-	if err := s.auth.SendLoginSms(r.Context(), in.Phone); err != nil {
+	if err := p.Auth.SendLoginSms(r.Context(), in.Phone, in.Ticket, in.Randstr); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -115,6 +181,14 @@ func (s *Server) handleLoginSms(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.platform(w, r)
+	if !ok {
+		return
+	}
+	if p.Auth == nil {
+		writeUnsupported(w, "短信登录")
+		return
+	}
 	var in struct {
 		Phone  string `json:"phone"`
 		Code   string `json:"code"`
@@ -124,7 +198,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.auth.Login(r.Context(), in.Phone, in.Code, in.Ticket)
+	out, err := p.Auth.Login(r.Context(), in.Phone, in.Code, in.Ticket)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -189,9 +263,12 @@ func writeError(w http.ResponseWriter, err error) {
 
 	var be *usecase.BusinessError
 	var se *usecase.SignError
+	var ue *usecase.UpstreamError
 	switch {
 	case errors.Is(err, usecase.ErrMissingToken),
-		errors.Is(err, usecase.ErrMissingUserMainID),
+		errors.Is(err, usecase.ErrInvalidToken),
+		errors.Is(err, usecase.ErrTokenExpired),
+		errors.Is(err, usecase.ErrMissingUserID),
 		errors.Is(err, usecase.ErrMissingFile),
 		errors.Is(err, usecase.ErrFileTooLarge),
 		errors.Is(err, usecase.ErrInvalidPhone),
@@ -203,7 +280,7 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusBadRequest
 		body["message"] = be.Message
 		body["code"] = be.Code
-	case errors.As(err, &se):
+	case errors.As(err, &se), errors.As(err, &ue):
 		status = http.StatusBadGateway
 	default:
 		if strings.Contains(err.Error(), "喜茶") {

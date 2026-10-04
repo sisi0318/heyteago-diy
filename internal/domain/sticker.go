@@ -8,12 +8,12 @@ const (
 	CupWidth  = 596
 	CupHeight = 832
 
-	// MaxUploadBytes 是服务端对上传文件的兜底上限。
-	// 前端渲染管线会把产物压到 200KB 以内，这里仅防越界请求。
+	// MaxUploadBytes 是服务端对上传文件的兜底上限（各平台共用）。
+	// 前端渲染管线按平台上限压缩产物（喜茶 200KB），这里仅防越界请求。
 	MaxUploadBytes = 2 << 20
 )
 
-// Result 是喜茶 App 通道业务响应的统一形状（code/message/data）。
+// Result 是平台业务响应的统一形状（code/message/data），喜茶 App 与奈雪小程序通道一致。
 type Result struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
